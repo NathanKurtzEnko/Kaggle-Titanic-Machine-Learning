@@ -23,19 +23,20 @@ library(ggplot2)
 library(tibble)
 library(stats)
 library(DAAG)
+library(randomForest)
 ```
 
 ##Import Train and Test Data
 
 ```{r}
-train.df <- read.csv("C:\\Users\\Marvin\\Desktop\\Nathan Coding Stuff\\Data Sets\\Titanic\\train.csv")
+train.df <- read.csv("C:\\Users\\Nathan\\Documents\\Kaggle-Titanic-Machine-Learning\\train - train.csv")
 
-test.df <- read.csv("C:\\Users\\Marvin\\Desktop\\Nathan Coding Stuff\\Data Sets\\Titanic\\test.csv")
+test.df <- read.csv("C:\\Users\\Nathan\\Documents\\Kaggle-Titanic-Machine-Learning\\test - test.csv")
 ```
 
 ##Data Cleaning
 
-###Remove variables with mostly NA values and observations with mostly NA values
+###Search for NA Values
 
 ```{r}
 numvars <- ncol(train.df)
@@ -58,20 +59,94 @@ max(numObNA.df$NAs)
 ```
 
 
-It looks like all NA values exist within one column. So we will simply remove the observations which have NA values because there will still be plenty of observations left to train the model on.
+It looks like all NA values exist within one column, the age column. Because we must make a prediction for each individual, we will find the average age for individuals for a variety of different age groups as defined by the range of ages for people with certain titles or prefixes to their names.
+
+####Organize data to by name prefix
 
 ```{r}
-train2.df <- na.omit(train.df)
-#test2.df <- na.omit(test.df)
+
+male.df <- train.df %>% filter(Sex == "male")
+female.df <- train.df %>% filter(Sex == "female")
+
+maleNames <- male.df$Name
+femaleNames <- female.df$Name
+dataNames <- train.df$Name
+
+Master.df <- male.df %>%
+  filter(str_detect(maleNames, "Master.") == TRUE)
+Miss.df <- female.df %>%
+  filter(str_detect(femaleNames, "Miss.") == TRUE)
+Mr.df <- male.df %>%
+  filter(str_detect(maleNames, "Mr.") == TRUE)
+Mrs.df <- female.df %>%
+  filter(str_detect(femaleNames, "Mrs.") == TRUE)
+Dr.df <- train.df %>%
+  filter(str_detect(dataNames, "Dr.") == TRUE)
+
 ```
 
-###Remove variables that aren't useful for modeling techniques or empty 
-There don't appear to be many entries for the "Cabin" variable so we will remove that, as well as "Name", and "Ticket"
+####Find average ages, range, and median for potential use later on
+
 ```{r}
-train3.df <- train2.df %>%
+Master.min <- min(na.omit(Master.df$Age))
+Master.max <- max(na.omit(Master.df$Age))
+Master.range <- Master.min:Master.max
+Master.mean <- mean(Master.df$Age, na.rm = TRUE)
+Master.median <- median(Master.df$Age, na.rm = TRUE)
+
+Miss.min <- min(na.omit(Miss.df$Age))
+Miss.max <- max(na.omit(Miss.df$Age))
+Miss.range <- Miss.min:Miss.max
+Miss.mean <- mean(Miss.df$Age, na.rm = TRUE)
+Miss.median <- median(Miss.df$Age, na.rm = TRUE)
+
+Mr.min <- min(na.omit(Mr.df$Age))
+Mr.max <- max(na.omit(Mr.df$Age))
+Mr.range <- Mr.min:Mr.max
+Mr.mean <- mean(Mr.df$Age, na.rm = TRUE)
+Mr.median <- median(Mr.df$Age, na.rm = TRUE)
+
+Mrs.min <- min(na.omit(Mrs.df$Age))
+Mrs.max <- max(na.omit(Mrs.df$Age))
+Mrs.range <- Mrs.min:Mrs.max
+Mrs.mean <- mean(Mrs.df$Age, na.rm = TRUE)
+Mrs.median <- median(Mrs.df$Age, na.rm = TRUE)
+
+Dr.min <- min(na.omit(Dr.df$Age))
+Dr.max <- max(na.omit(Dr.df$Age))
+Dr.range <- Dr.min:Dr.max
+Dr.mean <- mean(Dr.df$Age, na.rm = TRUE)
+Dr.median <- median(Dr.df$Age, na.rm = TRUE)
+```
+
+####Replace NAs with mean values
+
+```{r}
+prefixs <- c("Mr.", "Mrs.", "Miss.", "Master.", "Dr.")
+meanvals <- c(Mr.mean, Mrs.mean, Miss.mean, Master.mean, Dr.mean)
+numrows <- nrow(train.df)
+
+for(i in 1:5){
+  for(a in 1:numrows){
+    if(str_detect(train.df[a, 4], prefixs[i])){
+      if(is.na(train.df[a, 6])){
+        train.df[a, 6] <- meanvals[i]
+      }
+    }
+  }
+}
+```
+
+
+###Remove variables that aren't useful for modeling techniques or empty 
+
+There don't appear to be many entries for the "Cabin" variable so we will remove that, as well as "Name", and "Ticket"
+
+```{r}
+train3.df <- train.df %>%
   select(-c("Cabin", "Name", "Ticket"))
 
-#test3.df <- test2.df %>% select(-c("Cabin", "Name", "Ticket"))
+
 ```
 
 ###Change factor variables to have integer values
@@ -81,22 +156,11 @@ train3.2.df <- train3.df %>%
   mutate(Embarked = as.character(Embarked)) %>%
   mutate(Embarked = as.factor(Embarked))
 
-#test3.2.df <- test3.df %>%
- # filter(Embarked != "")%>%
- # mutate(Embarked = as.character(Embarked)) %>%
-#  mutate(Embarked = as.factor(Embarked))
-
-#c=1, Q=2, S=3
-
 for(i in 1:3){
   levels(train3.2.df$Embarked)[i] <- i
-  #levels(test3.2.df$Embarked)[i] <- i
-}
+ }
 
 train3.3.df <- train3.2.df %>%
-  mutate(Embarked = as.numeric(Embarked))
-
-#test3.3.df <- test3.2.df %>%
   mutate(Embarked = as.numeric(Embarked))
 ```
 
@@ -106,12 +170,103 @@ train3.3.df <- train3.2.df %>%
 train4.df <- train3.3.df %>%
   mutate(IsMale = ifelse(Sex == "male", 1, 0)) %>%
   select(-Sex)
-train4.df <- as.tibble(train4.df)
+train4.df <- as_tibble(train4.df)
+```
 
-#test4.df <- test3.3.df %>%
-  #mutate(IsMale = ifelse(Sex == "male", 1, 0)) %>%
-  #select(-Sex)
-#test4.df <- as.tibble(test4.df)
+###Repeat all of these steps for the testing data frame
+
+```{r}
+male.df <- test.df %>% filter(Sex == "male")
+female.df <- test.df %>% filter(Sex == "female")
+
+maleNames <- male.df$Name
+femaleNames <- female.df$Name
+dataNames <- test.df$Name
+
+Master.df <- male.df %>%
+  filter(str_detect(maleNames, "Master.") == TRUE)
+Miss.df <- female.df %>%
+  filter(str_detect(femaleNames, "Miss.") == TRUE | str_detect(femaleNames, "Ms.") == TRUE)
+Mr.df <- male.df %>%
+  filter(str_detect(maleNames, "Mr.") == TRUE)
+Mrs.df <- female.df %>%
+  filter(str_detect(femaleNames, "Mrs.") == TRUE)
+Dr.df <- test.df %>%
+  filter(str_detect(dataNames, "Dr.") == TRUE)
+
+Ms.df <- female.df %>%
+  filter(str_detect(femaleNames, "Ms.") == TRUE)
+
+Master.min <- min(na.omit(Master.df$Age))
+Master.max <- max(na.omit(Master.df$Age))
+Master.range <- Master.min:Master.max
+Master.mean <- mean(Master.df$Age, na.rm = TRUE)
+Master.median <- median(Master.df$Age, na.rm = TRUE)
+
+Miss.min <- min(na.omit(Miss.df$Age))
+Miss.max <- max(na.omit(Miss.df$Age))
+Miss.range <- Miss.min:Miss.max
+Miss.mean <- mean(Miss.df$Age, na.rm = TRUE)
+Miss.median <- median(Miss.df$Age, na.rm = TRUE)
+
+Mr.min <- min(na.omit(Mr.df$Age))
+Mr.max <- max(na.omit(Mr.df$Age))
+Mr.range <- Mr.min:Mr.max
+Mr.mean <- mean(Mr.df$Age, na.rm = TRUE)
+Mr.median <- median(Mr.df$Age, na.rm = TRUE)
+
+Mrs.min <- min(na.omit(Mrs.df$Age))
+Mrs.max <- max(na.omit(Mrs.df$Age))
+Mrs.range <- Mrs.min:Mrs.max
+Mrs.mean <- mean(Mrs.df$Age, na.rm = TRUE)
+Mrs.median <- median(Mrs.df$Age, na.rm = TRUE)
+
+Dr.min <- min(na.omit(Dr.df$Age))
+Dr.max <- max(na.omit(Dr.df$Age))
+Dr.range <- Dr.min:Dr.max
+Dr.mean <- mean(Dr.df$Age, na.rm = TRUE)
+Dr.median <- median(Dr.df$Age, na.rm = TRUE)
+
+prefixs <- c("Mr.", "Mrs.", "Miss.", "Master.", "Dr.")
+meanvals <- c(Mr.mean, Mrs.mean, Miss.mean, Master.mean, Dr.mean)
+numrows <- nrow(test.df)
+
+for(i in 1:5){
+  for(a in 1:numrows){
+    if(str_detect(test.df[a, 3], prefixs[i])){
+      if(is.na(test.df[a, 5])){
+        test.df[a, 5] <- meanvals[i]
+      }
+    }
+  }
+}
+
+test3.df <- test.df %>%
+  select(-c("Cabin", "Name", "Ticket"))
+
+test3.2.df <- test3.df %>%
+  filter(Embarked != "") %>%
+  mutate(Embarked = as.character(Embarked)) %>%
+  mutate(Embarked = as.factor(Embarked))
+
+for(i in 1:3){
+  levels(test3.2.df$Embarked)[i] <- i
+ }
+
+test3.3.df <- test3.2.df %>%
+  mutate(Embarked = as.numeric(Embarked))
+
+test4.df <- test3.3.df %>%
+  mutate(IsMale = ifelse(Sex == "male", 1, 0)) %>%
+  select(-Sex)
+test4.df <- as_tibble(test4.df)
+
+other.df <- test.df %>%
+  filter(is.na(test.df$Age)) 
+
+other.df <- other.df %>%
+  filter(str_detect(other.df$Name, "Mr.|Mrs.|Master.|Miss.", negate = TRUE) == TRUE)
+
 ```
 
 ##Exploratory Data Analysis
@@ -236,29 +391,7 @@ read.csv("C:\\Users\\Marvin\\Desktop\\Nathan Coding Stuff\\Data Sets\\Titanic\\k
 
 
 
-```{r}
 
-male.df <- train.df %>% filter(Sex == "male")
-female.df <- train.df %>% filter(Sex == "female")
-
-maleNames <- male.df$Name
-femaleNames <- female.df$Name
-dataNames <- train.df$Name
-
-Master.df <- male.df %>%
-  filter(str_detect(maleNames, "Master.") == TRUE)
-Miss.df <- female.df %>%
-  filter(str_detect(femaleNames, "Miss.") == TRUE)
-Mr <- male.df %>%
-  filter(str_detect(maleNames, "Mr.") == TRUE)
-Mrs.df <- female.df %>%
-  filter(str_detect(femaleNames, "Mrs.") == TRUE)
-Dr.df <- train.df %>%
-  filter(str_detect(dataNames, "Dr.") == TRUE)
-
-#find the average age for each name group or the range of ages for each name group and the either replace NA values with average age for name group or a randomly chosen one in the age range for name group.
-S
-```
 
 ```{r}
 Na.stuff <- train.df %>%
