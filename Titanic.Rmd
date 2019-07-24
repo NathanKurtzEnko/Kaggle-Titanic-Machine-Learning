@@ -1,0 +1,267 @@
+---
+title: 'Kaggle: Titanic Survival'
+author: "nathan kurtzenko"
+date: "7/17/2019"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+##Introduction
+
+The purpose of this Rmarkdown document is to explore different modeling techniques to predict as accurately as possible whether or not an individual on boad the Titanic was to survive. We will produce a few different models. It would be most useful to use classification models rather than regressive models considering the predicted output. However, we will attempt a linear regressive model as well in our efforts. 
+
+##Import Libraries
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(FNN)
+library(ggplot2)
+library(tibble)
+library(stats)
+library(DAAG)
+```
+
+##Import Train and Test Data
+
+```{r}
+train.df <- read.csv("C:\\Users\\Marvin\\Desktop\\Nathan Coding Stuff\\Data Sets\\Titanic\\train.csv")
+
+test.df <- read.csv("C:\\Users\\Marvin\\Desktop\\Nathan Coding Stuff\\Data Sets\\Titanic\\test.csv")
+```
+
+##Data Cleaning
+
+###Remove variables with mostly NA values and observations with mostly NA values
+
+```{r}
+numvars <- ncol(train.df)
+numColNA.df <- tibble(colnum = 1:numvars, NAs = 1:numvars)
+for(i in 1:numvars) {
+  column <- train.df[, i]
+  NAs <- sum(is.na(column))
+  numColNA.df[i, 2] <- NAs
+}
+numColNA.df
+names(train.df)[6]
+numobs <- nrow(train.df)
+numObNA.df <- tibble(rownum = 1:numobs, NAs = 1:numobs)
+for(i in 1:numobs) {
+  rows <- train.df[i, ]
+  NAs <- sum(is.na(rows))
+  numObNA.df[i, 2] <- NAs
+}
+max(numObNA.df$NAs)
+```
+
+
+It looks like all NA values exist within one column. So we will simply remove the observations which have NA values because there will still be plenty of observations left to train the model on.
+
+```{r}
+train2.df <- na.omit(train.df)
+#test2.df <- na.omit(test.df)
+```
+
+###Remove variables that aren't useful for modeling techniques or empty 
+There don't appear to be many entries for the "Cabin" variable so we will remove that, as well as "Name", and "Ticket"
+```{r}
+train3.df <- train2.df %>%
+  select(-c("Cabin", "Name", "Ticket"))
+
+#test3.df <- test2.df %>% select(-c("Cabin", "Name", "Ticket"))
+```
+
+###Change factor variables to have integer values
+```{r}
+train3.2.df <- train3.df %>%
+  filter(Embarked != "") %>%
+  mutate(Embarked = as.character(Embarked)) %>%
+  mutate(Embarked = as.factor(Embarked))
+
+#test3.2.df <- test3.df %>%
+ # filter(Embarked != "")%>%
+ # mutate(Embarked = as.character(Embarked)) %>%
+#  mutate(Embarked = as.factor(Embarked))
+
+#c=1, Q=2, S=3
+
+for(i in 1:3){
+  levels(train3.2.df$Embarked)[i] <- i
+  #levels(test3.2.df$Embarked)[i] <- i
+}
+
+train3.3.df <- train3.2.df %>%
+  mutate(Embarked = as.numeric(Embarked))
+
+#test3.3.df <- test3.2.df %>%
+  mutate(Embarked = as.numeric(Embarked))
+```
+
+###Dummy Variable for Sex
+
+```{r}
+train4.df <- train3.3.df %>%
+  mutate(IsMale = ifelse(Sex == "male", 1, 0)) %>%
+  select(-Sex)
+train4.df <- as.tibble(train4.df)
+
+#test4.df <- test3.3.df %>%
+  #mutate(IsMale = ifelse(Sex == "male", 1, 0)) %>%
+  #select(-Sex)
+#test4.df <- as.tibble(test4.df)
+```
+
+##Exploratory Data Analysis
+
+###Take a Look at the first few observations and variables
+```{r}
+head(train3.df)
+names(train3.df)
+```
+
+###Make Some visualizations of the variables
+
+```{r}
+ggplot(train3.df)+
+  geom_bar(aes(x = Sex))+
+  ggtitle("Number of Men and Women Aboard")
+```
+
+There are considerably more men aboard the titanic in this data set, so it would be logical to assume that considerably more men are to not have survived.
+
+```{r}
+#let's look at the distribution of age for men, women, and all
+#let's organize train.df to visualize the above 
+train.male.df <- train3.df %>%
+  group_by(Age) %>%
+  summarise(men = sum(Sex == "male", na.rm = TRUE))
+train.female.df <- train3.df %>%
+  group_by(Age) %>% 
+  summarise(women = sum(Sex == "female", na.rm = TRUE))
+train.mf.df <- left_join(train.male.df, train.female.df) %>%
+  filter(is.na(Age) == FALSE)
+
+#time to make plots
+ggplot(train.mf.df)+
+  geom_point(aes(x = Age, y = men, color = "Male"))+
+  geom_smooth(aes(x = Age, y = men, color = "Male"), se = FALSE)+
+  geom_point(aes(x = Age, y = women, color = "Female"))+
+  geom_smooth(aes(x = Age, y = women, color = "Female"), se = FALSE)+
+  ylab("Count")+
+  ggtitle("Distribution of Men and Women by Age")
+  scale_color_manual(name = "Sex",
+                     values = c("Male" = "blue", "Female" = "pink"))
+
+```
+
+Seems to be a slightly left skewed normal distribution of men and women. Therefore, a greater number of young individuals will not survive most likely.
+
+##KNN model
+
+###Organize data for knn.cv()
+
+```{r}
+input.train <- as.data.frame(train4.df %>% select(-Survived))
+output.train <- as.vector(as.matrix(train4.df[,2]))
+class.train <- as.factor(output.train)
+
+input.test <- as.data.frame(test4.df)
+#output.test <- as.vector(as.matrix(test4.df[,2]))
+#class.test <- as.factor(output.test)
+```
+
+###Cross-validate to find best K
+
+```{r}
+kvals <- 2:20
+kvals_tb <- tibble(k = kvals, err = kvals)
+for(k in kvals){
+  knn.cross_valid <- knn.cv(input.train, class.train, k)
+  err <- sum(knn.cross_valid != class.train)/length(class.train)
+  kvals_tb[k-1, 2] <- err
+}
+
+min_err_ind <- which.min(kvals_tb$err)
+best_k <- (kvals_tb$k)[min_err_ind]
+```
+
+###Model predictions
+
+```{r}
+knn.mod <- knn(input.train, test.df, class.train, k = best_k)
+write.csv(knn.mod, "knnPred.csv", row.names = FALSE)
+```
+
+##Linear Model
+
+```{r}
+cv.lm(data = train4.df, form.lm = Survived ~ ., m = 10)
+
+lm.mod <- lm(Survived ~ ., data = train4.df)
+lm.pred <- predict(lm.mod, newdata = test4.df)
+resp <- ifelse(lm.pred > .5, 0, 1)
+err <- sum(resp == test4.df[,2])/nrow(test4.df)
+err
+```
+
+##Non-linear Model
+
+```{r}
+read.csv("C:\\Users\\Marvin\\Desktop\\Nathan Coding Stuff\\Data Sets\\Titanic\\knnPred.csv"
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+male.df <- train.df %>% filter(Sex == "male")
+female.df <- train.df %>% filter(Sex == "female")
+
+maleNames <- male.df$Name
+femaleNames <- female.df$Name
+dataNames <- train.df$Name
+
+Master.df <- male.df %>%
+  filter(str_detect(maleNames, "Master.") == TRUE)
+Miss.df <- female.df %>%
+  filter(str_detect(femaleNames, "Miss.") == TRUE)
+Mr <- male.df %>%
+  filter(str_detect(maleNames, "Mr.") == TRUE)
+Mrs.df <- female.df %>%
+  filter(str_detect(femaleNames, "Mrs.") == TRUE)
+Dr.df <- train.df %>%
+  filter(str_detect(dataNames, "Dr.") == TRUE)
+
+#find the average age for each name group or the range of ages for each name group and the either replace NA values with average age for name group or a randomly chosen one in the age range for name group.
+S
+```
+
+```{r}
+Na.stuff <- train.df %>%
+  filter(is.na(Age) == TRUE)
+```
+
