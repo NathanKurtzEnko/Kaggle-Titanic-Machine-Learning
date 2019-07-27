@@ -25,6 +25,7 @@ library(stats)
 library(DAAG)
 library(randomForest)
 library(boot)
+library(rfUtilities)
 ```
 
 ##Import Train and Test Data
@@ -352,25 +353,112 @@ write.csv(knn.mod, "knnPred.csv", row.names = FALSE)
 
 ##Linear Model
 
+###Get an estimate of accuracy for our model
 ```{r}
+#split the data randomly a number of times and train and test over each split each time
 cv.lm(data = train4.df, form.lm = Survived ~ ., m = 10)
 
-lm.mod <- lm(Survived ~ ., data = train4.df)
-lm.pred <- predict(lm.mod, newdata = test4.df)
-resp <- ifelse(lm.pred > .5, 0, 1)
+#lets do 100 splits
+test.results <- c(1:100)
+
+for(i in 1:100){
+  n <- nrow(train4.df)
+  train.points <- sample(1:n, n/2, replace = FALSE)
+  train.points.df <- train4.df[train.points, ]
+  test.points.df <- train4.df[-train.points, ]
+  test.points.input <- test.points.df[, -2]
+  test.points.output <- test.points.df[, 2]
+
+  lm.mod1 <- lm(Survived ~ ., data = train.points.df)
+  lm.pred1 <- predict(lm.mod1, newdata = test.points.input)
+  resp <- ifelse(lm.pred1 > .5, 1, 0)
+  err <- mean(resp != test.points.output)
+  test.results[i] <- err
+}
+
+mean(test.results)
 
 
 ```
 
+### Actual model
+
+```{r}
+mod.lm <- lm(Survived ~ ., train4.df)
+lm.pred <- predict(lm, newdata = test4.df)
+lm.resp <- ifelse(lm.pred > .5, 1, 0)
+
+write.csv(lm.resp, "lmPred.csv", row.names = FALSE)
+```
+
 ##logtistic regression
 
+###Do a similar thing as with LM
+
+```{r}
+#lets do 100 splits
+test.results <- c(1:100)
+
+for(i in 1:100){
+  n <- nrow(train4.df)
+  train.points <- sample(1:n, n/2, replace = FALSE)
+  train.points.df <- train4.df[train.points, ]
+  test.points.df <- train4.df[-train.points, ]
+  test.points.input <- test.points.df[, -2]
+  test.points.output <- test.points.df[, 2]
+
+  glm.mod1 <- glm(Survived ~ ., family = "binomial", data = train.points.df)
+  glm.pred1 <- predict(glm.mod1, newdata = test.points.input)
+  resp <- ifelse(glm.pred1 > .5, 1, 0)
+  err <- mean(resp != test.points.output)
+  test.results[i] <- err
+}
+
+mean(test.results)
+```
+
+###Actual Model
+
+```{r}
+glm.mod <- glm(Survived ~ ., family = "binomial", data = train4.df)
+anova(glm.mod)
+summary(glm.mod)
+glm.pred <- predict(glm.mod, newdata = test4.df)
+glm.resp <- ifelse(glm.mod > .5, 1, 0)
+
+write.csv(glm.resp, "glmPred.csv", row.names = FALSE)
+```
+
+
 ##Random Forest
+
+###Cross-validate and find optimal value for ntrees
+```{r}
+ntrees <- 2:100
+
+for(t in ntrees){
+  n <- nrow(train4.df)
+  train.points <- sample(1:n, n/2, replace = FALSE)
+  train.points.df <- train4.df[train.points, ]
+  test.points.df <- train4.df[-train.points, ]
+  train.points.input <- as.data.frame(train.points.df[, -2])
+  train.points.output <- as.vector(as.matrix(train.points.df[, 2]))
+  test.points.input <- test.points.df[, -2]
+  test.points.output <- test.points.df[, 2]
+  
+  rf.mod <- randomForest(train.points.input, train.points.output, ntree = t)
+  rf.cv <- rf.crossValidation(rf.mod, train.points.input, ntree = t)
+}
+
+
+```
+
 
 
 ##Compare the predictions made
 
 ```{r}
-all_preds <- cbind(knn = as.numeric(knn.mod)-1, lm = resp)
+all_preds <- cbind(knn = as.numeric(knn.mod)-1, lm = lm.resp, glm = glm.resp)
 View(all_preds)
 ```
 
