@@ -148,6 +148,7 @@ There don't appear to be many entries for the "Cabin" variable so we will remove
 train3.df <- train.df %>%
   select(-c("Cabin", "Name", "Ticket"))
 
+#consider also removing the passenger ID
 
 ```
 
@@ -164,6 +165,10 @@ for(i in 1:3){
 
 train3.3.df <- train3.2.df %>%
   mutate(Embarked = as.numeric(Embarked))
+
+#more succinct way of changing column type than mutate is:
+#train.df[, Embarked] <- as.factor(train.df$Embarked, c(1,2,3), labels = c(1,2,3))
+#other applications of this syntax besides just changing things into factors
 ```
 
 ###Dummy Variable for Sex
@@ -173,6 +178,8 @@ train4.df <- train3.3.df %>%
   mutate(IsMale = ifelse(Sex == "male", 1, 0)) %>%
   select(-Sex)
 train4.df <- as_tibble(train4.df)
+
+#train.df[, Sex] <- as.numeric(Sex)
 ```
 
 ###Repeat all of these steps for the testing data frame
@@ -385,7 +392,7 @@ mean(test.results)
 
 ```{r}
 mod.lm <- lm(Survived ~ ., train4.df)
-lm.pred <- predict(lm, newdata = test4.df)
+lm.pred <- predict(mod.lm, newdata = test4.df)
 lm.resp <- ifelse(lm.pred > .5, 1, 0)
 
 write.csv(lm.resp, "lmPred.csv", row.names = FALSE)
@@ -424,7 +431,7 @@ glm.mod <- glm(Survived ~ ., family = "binomial", data = train4.df)
 anova(glm.mod)
 summary(glm.mod)
 glm.pred <- predict(glm.mod, newdata = test4.df)
-glm.resp <- ifelse(glm.mod > .5, 1, 0)
+glm.resp <- ifelse(glm.pred > .5, 1, 0)
 
 write.csv(glm.resp, "glmPred.csv", row.names = FALSE)
 ```
@@ -433,26 +440,76 @@ write.csv(glm.resp, "glmPred.csv", row.names = FALSE)
 ##Random Forest
 
 ###Cross-validate and find optimal value for ntrees
+####Set up parallel computing for iteration
 ```{r}
-ntrees <- 2:100
+#this is slow so lets use parallel computing
+library(parallel)
+library(doParallel)
+library(foreach)
 
-for(t in ntrees){
-  n <- nrow(train4.df)
-  train.points <- sample(1:n, n/2, replace = FALSE)
-  train.points.df <- train4.df[train.points, ]
-  test.points.df <- train4.df[-train.points, ]
-  train.points.input <- as.data.frame(train.points.df[, -2])
-  train.points.output <- as.vector(as.matrix(train.points.df[, 2]))
-  test.points.input <- test.points.df[, -2]
-  test.points.output <- test.points.df[, 2]
-  
-  rf.mod <- randomForest(train.points.input, train.points.output, ntree = t)
-  rf.cv <- rf.crossValidation(rf.mod, train.points.input, ntree = t)
-}
-
+numcores <- detectCores()
+registerDoParallel(numcores)
 
 ```
 
+####cross-validation
+```{r}
+#use foreach and %dopar% for parallel
+train5.df <- train4.df %>%
+  mutate(Survived = as.factor(Survived))
+
+train.points.input <- as.data.frame(train5.df[, -2])
+train.points.output <- as.factor(as.vector(as.matrix(train5.df[, 2])))
+
+ntrees <- 2:200
+
+rf.err <- as_tibble(
+  foreach(i = ntrees, .combine = rbind, .packages = c('randomForest', 'rfUtilities')) %dopar% {
+  rf.mod <- randomForest(train.points.input, train.points.output, ntree = i)
+  rf.cross <- rf.crossValidation(rf.mod, train.points.input)
+  c(mean(rf.cross$cross.validation$cv.oob$OOB),
+    mean(rf.cross$cross.validation$cv.oob$kappa))
+  })
+
+names(rf.err) <- c("err", "kappa")
+
+stopImplicitCluster()
+
+#for understanding user, producer, and oob accuracies, and Kappa value
+# http://gsp.humboldt.edu/olm_2015/Courses/GSP_216_Online/lesson6-2/metrics.html
+
+rf.cv.err <- tibble(ntree = ntrees, error = rf.err)
+
+#OOB error is the out-of-bag error or simply, the error rate for the cross-validation
+```
+
+
+```{r}
+#without parallel computing
+#use foreach and %dopar% for parallel
+train5.df <- train4.df %>%
+  mutate(Survived = as.factor(Survived))
+
+train.points.input <- as.data.frame(train5.df[, -2])
+train.points.output <- as.factor(as.vector(as.matrix(train5.df[, 2])))
+
+ntrees <- 2:100
+
+rf.cv.err <- tibble(ntree = ntrees, error = ntrees)
+
+for(t in ntrees){
+  rf.mod <- randomForest(train.points.input, train.points.output, ntree = t)
+  rf.cross <- rf.crossValidation(rf.mod, train.points.input)
+  err <- mean(rf.cross$cross.validation$cv.oob$OOB) 
+  rf.cv.err[t-1, 2] <- err
+}
+
+```
+
+
+####min error n tree
+
+###random forest model using optimal ntree
 
 
 ##Compare the predictions made
@@ -484,5 +541,11 @@ for(i in 1:ncols){
 
 names(input.test)[6]
 which(is.na(input.test$Fare))
+```
+
+```{r}
+foreach (i=1:3, .combine=rbind) %dopar% {
+  c(sqrt(i), i^2)
+}
 ```
 
