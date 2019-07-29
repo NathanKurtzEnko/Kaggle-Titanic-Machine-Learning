@@ -415,7 +415,7 @@ for(i in 1:100){
   test.points.output <- test.points.df[, 2]
 
   glm.mod1 <- glm(Survived ~ ., family = "binomial", data = train.points.df)
-  glm.pred1 <- predict(glm.mod1, newdata = test.points.input)
+  glm.pred1 <- predict(glm.mod1, newdata = test.points.input, type = "response")
   resp <- ifelse(glm.pred1 > .5, 1, 0)
   err <- mean(resp != test.points.output)
   test.results[i] <- err
@@ -430,7 +430,7 @@ mean(test.results)
 glm.mod <- glm(Survived ~ ., family = "binomial", data = train4.df)
 anova(glm.mod)
 summary(glm.mod)
-glm.pred <- predict(glm.mod, newdata = test4.df)
+glm.pred <- predict(glm.mod, newdata = test4.df, type = "response")
 glm.resp <- ifelse(glm.pred > .5, 1, 0)
 
 write.csv(glm.resp, "glmPred.csv", row.names = FALSE)
@@ -478,47 +478,46 @@ stopImplicitCluster()
 #for understanding user, producer, and oob accuracies, and Kappa value
 # http://gsp.humboldt.edu/olm_2015/Courses/GSP_216_Online/lesson6-2/metrics.html
 
-rf.cv.err <- tibble(ntree = ntrees, error = rf.err)
+rf.cv.err <- cbind(ntrees, rf.err)
+names(rf.cv.err) <- c("trees", "err", "kappa")
 
 #OOB error is the out-of-bag error or simply, the error rate for the cross-validation
 ```
 
 
+####min error n tree
+
 ```{r}
-#without parallel computing
-#use foreach and %dopar% for parallel
+ind <- which.min(rf.cv.err$err)
+min.tree <- rf.cv.err[ind, 1]
+```
+
+###random forest model using optimal ntree
+
+```{r}
 train5.df <- train4.df %>%
   mutate(Survived = as.factor(Survived))
 
 train.points.input <- as.data.frame(train5.df[, -2])
 train.points.output <- as.factor(as.vector(as.matrix(train5.df[, 2])))
 
-ntrees <- 2:100
+rf.mod <- randomForest(train.points.input, train.points.output, ntree = min.tree)
+rf.pred <- predict(rf.mod, newx = test4.df)
 
-rf.cv.err <- tibble(ntree = ntrees, error = ntrees)
-
-for(t in ntrees){
-  rf.mod <- randomForest(train.points.input, train.points.output, ntree = t)
-  rf.cross <- rf.crossValidation(rf.mod, train.points.input)
-  err <- mean(rf.cross$cross.validation$cv.oob$OOB) 
-  rf.cv.err[t-1, 2] <- err
-}
-
+write.csv(rf.pred, "rfPred.csv", row.names = FALSE)
 ```
-
-
-####min error n tree
-
-###random forest model using optimal ntree
 
 
 ##Compare the predictions made
 
 ```{r}
-all_preds <- cbind(knn = as.numeric(knn.mod)-1, lm = lm.resp, glm = glm.resp)
+all_preds <- cbind(knn = as.numeric(knn.mod)-1, lm = lm.resp, glm = glm.resp, rf = as.numeric(rf.pred)-1)
 View(all_preds)
 ```
 
+```{r}
+rf <- read.csv("C:\\Users\\Marvin\\Documents\\Kaggle-Titanic-Machine-Learning\\rfPred.csv")
+```
 
 
 
